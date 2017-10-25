@@ -1,30 +1,42 @@
 use super::pin::I2CPin;
 use super::register::I2CRegister;
 
+#[derive(Copy, Clone, Debug)]
 enum ReadLoopState {
     Idle,
     WaitClockLow,
     WaitClockHigh,
 }
 
+#[derive(Copy, Clone, Debug)]
 enum I2CState {
     ReadI2CAddr,
-    WriteRegister, // if repeated start -> ReadValue; else WriteValue
-    WriteValue, // master writes; slave reads
-    ReadValue, // slave writes; master reads
+    // if repeated start -> ReadValue; else WriteValue
+    SlaveReadValue,
+    // master writes; slave reads
+    SlaveWriteValue,
+    // slave writes; master reads
 }
 
+#[derive(Copy, Clone, Debug)]
 enum ReadWriteBit {
-    Read,
-    Write,
+    SlaveRead,
+    SlaveWrite,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum ReadByteResult {
+    Start,
+    Stop,
+    Byte(u8),
 }
 
 impl ReadWriteBit {
     fn from_value(value: u8) -> Self {
         if value & 1 == 1 {
-            ReadWriteBit::Read
+            ReadWriteBit::SlaveRead
         } else {
-            ReadWriteBit::Write
+            ReadWriteBit::SlaveWrite
         }
     }
 }
@@ -38,7 +50,6 @@ const STANDARD_ADDRESS: u8 = 0b0101_0101; // dec: 85
 /// address: i²c address, only 7bit mode supported
 pub struct HWThread {
     address: u8,
-    rw_bit: ReadWriteBit,
     registers: Vec<I2CRegister>,
     current_register: Option<u8>,
     scl: I2CPin,
@@ -68,7 +79,6 @@ impl HWThread {
 
         HWThread {
             address: STANDARD_ADDRESS,
-            rw_bit: ReadWriteBit::Read,
             registers: Vec::new(),
             current_register: Option::None,
             scl: I2CPin::new(PIN_SCL),
@@ -81,41 +91,104 @@ impl HWThread {
         loop {
             match state {
                 I2CState::ReadI2CAddr => {
-                    self.current_register = Option::None;
-                    self.wait_for_start();
-                    if let Ok(value) = self.read_byte() {
-                        if (value >> 1) == self.address {
-                            self.ack();
-                            self.rw_bit = ReadWriteBit::from_value(value);
-                        }
+                    self.wait_for_start().expect("Expected start.");
 
-                        // TODO: change state to next step
-                    } else {
-                        panic!("Could not read byte.");
+                    let result = self.read().expect("Could not read byte.");
+
+                    if let ReadByteResult::Byte(value) = result {
+                        if value >> 1 == self.address {
+                            self.ack();
+
+                            state = match ReadWriteBit::from_value(value) {
+                                ReadWriteBit::SlaveWrite => {
+                                    I2CState::SlaveWriteValue
+                                }
+                                ReadWriteBit::SlaveRead => {
+                                    self.current_register = None;
+                                    I2CState::SlaveReadValue
+                                }
+                            }
+                        }
                     }
-                },
-                I2CState::WriteRegister => {},
-                I2CState::WriteValue => {},
-                I2CState::ReadValue => {},
+                }
+                I2CState::SlaveReadValue => {
+                    match self.read().expect("Could not read.") {
+                        ReadByteResult::Byte(value) => {
+                            if let Some(register) = self.current_register {
+                                let register = register as usize;
+                                if register >= self.registers.len() {
+                                    panic!("Register {} does not exist.", register)
+                                }
+
+                                self.registers[register].set_value(value);
+                            } else {
+                                self.current_register = Some(value);
+                            }
+                            self.ack();
+                        }
+                        ReadByteResult::Stop => state = I2CState::ReadI2CAddr,
+                        ReadByteResult::Start => state = I2CState::ReadI2CAddr,
+                    }
+                }
+                I2CState::SlaveWriteValue => {
+                    if let ReadByteResult::Byte(value) = self.read().expect("Could not read.") {
+                        if value >> 1 == self.address && value & 1 == 0 {
+                            self.write_current_register();
+
+                            state = I2CState::ReadI2CAddr;
+                        }
+                    }
+                }
             }
         }
 
         // TODO: cleanup pins
     }
 
+    fn write_current_register(&self) -> Result<(), ()> {
+        if let Some(register) = self.current_register {
+            let register = register as usize;
+            if register >= self.registers.len() {
+                return Err(());
+            }
+
+            return self.write(self.registers[register].get_value());
+        }
+
+        Err(())
+    }
+
+    fn set_current_register(&mut self, value: u8) -> Result<(), ()> {
+        if let Some(register) = self.current_register {
+            let register = register as usize;
+            if register >= self.registers.len() {
+                return Err(());
+            }
+
+            self.registers[register].set_value(value);
+            return Ok(());
+        }
+
+        Err(())
+    }
+
     fn ack(&self) {
         unimplemented!()
     }
 
+    fn read(&self) -> Result<ReadByteResult, ()> {
+        unimplemented!()
+    }
+
+    fn write(&self, byte: u8) -> Result<(), ()> {
+        unimplemented!()
+    }
+
     fn wait_for_start(&self) -> Result<(), ()> {
-        unimplemented!()
-    }
-
-    fn read_byte(&self) -> Result<u8, ()> {
-        unimplemented!()
-    }
-
-    fn write_byte(&self, value: u8) -> Result<(), ()> {
-        unimplemented!()
+        let result = self.read().expect("Could not read byte");
+        match result {
+            ReadByteResult::Start => Ok(()),
+            _ => Err(()),
+        }
     }
 }
