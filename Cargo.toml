@@ -1,7 +1,11 @@
 [package]
 name = "i2c"
 version = "0.1.0"
-authors = ["martin-fink <martinfink99@gmail.com>"]
+authors = [
+    "Martin Fink <martinfink99@gmail.com>",
+    "Andreas Resch <resch.andreas@hotmail.it>",
+    "Tobias Oberdörfer <toroto006@hotmail.de>"
+]
 
 [dependencies]
 sysfs_gpio = "0.5.1"
