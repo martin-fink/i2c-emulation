@@ -1,34 +1,31 @@
-use sysfs_gpio::{Direction, Pin};
+use sysfs_gpio::{Direction, Pin, Edge};
 use std::error;
 use sysfs_gpio;
 use std::convert;
 use std::fmt;
+use std::error::Error;
 
 #[derive(Debug)]
 pub struct PinError {
-    cause: sysfs_gpio::Error,
+    msg: String,
 }
 
 impl error::Error for PinError {
     fn description(&self) -> &str {
-        self.cause.description()
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        self.cause.cause()
+        &self.msg
     }
 }
 
 impl fmt::Display for PinError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.cause.fmt(f)
+        self.msg.fmt(f)
     }
 }
 
 impl convert::From<sysfs_gpio::Error> for PinError {
     fn from(error: sysfs_gpio::Error) -> Self {
         PinError {
-            cause: error,
+            msg: String::from(error.description()),
         }
     }
 }
@@ -48,21 +45,37 @@ impl I2CPin {
         i2c_pin
     }
 
-    pub fn read(&self) -> Result<bool, PinError> {
+    pub fn read(&self) -> Result<u8, PinError> {
         self.hw_pin.set_direction(Direction::In)?;
 
-        Ok(self.hw_pin.get_value()? == 1)
+        Ok(self.hw_pin.get_value()?)
     }
 
     pub fn write(&self, value: bool) -> Result<(), PinError> {
         if value {
             self.hw_pin.set_direction(Direction::In)?;
         } else {
-            self.hw_pin.set_direction(Direction::Out)?;
-            self.hw_pin.set_value(0)?;
+            self.hw_pin.set_direction(Direction::Low)?;
         }
 
         Ok(())
+    }
+
+    pub fn reset(&self) -> Result<(), PinError> {
+        self.write(true)
+    }
+
+    /// high: RisingEdge
+    pub fn wait_until(&self, high: bool) -> Result<(), PinError> {
+        self.hw_pin.set_edge(if high { Edge::RisingEdge } else { Edge::FallingEdge })?;
+        let mut poller = self.hw_pin.get_poller()?;
+
+        loop {
+            match poller.poll(5000).expect("Unexpected error.") {
+                Some(value) => return Ok(()),
+                None => {}
+            }
+        }
     }
 }
 

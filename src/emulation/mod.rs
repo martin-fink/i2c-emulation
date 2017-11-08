@@ -1,4 +1,6 @@
 mod pin;
 mod main_thread;
 mod register;
-mod hardware_layer;
+mod bit_layer;
+
+pub use self::main_thread::MainThread;

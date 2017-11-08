@@ -1,6 +1,6 @@
 use super::pin::I2CPin;
 use super::register::I2CRegister;
-use super::hardware_layer::{HardwareLayer, ReadType};
+use super::bit_layer::BitLayer;
 
 #[derive(Copy, Clone, Debug)]
 enum ReadLoopState {
@@ -53,7 +53,7 @@ pub struct MainThread {
     address: u8,
     registers: Vec<I2CRegister>,
     current_register: Option<usize>,
-    hw_layer: HardwareLayer,
+    hw_layer: BitLayer,
 }
 
 impl MainThread {
@@ -81,7 +81,7 @@ impl MainThread {
             address: STANDARD_ADDRESS,
             registers: Vec::new(),
             current_register: Option::None,
-            hw_layer: HardwareLayer::new(PIN_SDA, PIN_SCL),
+            hw_layer: BitLayer::new(PIN_SDA, PIN_SCL),
         }
     }
 
@@ -90,51 +90,43 @@ impl MainThread {
         loop {
             match state {
                 I2CState::ReadI2CAddr => {
-                    self.wait_for_start().expect("Expected start.");
+                    self.hw_layer.wait_for_start().expect("Expected start.");
 
-                    let result = self.hw_layer.read().expect("Could not read byte.");
+                    let value = self.hw_layer.read_byte().expect("Could not read byte.");
 
-                    if let ReadByteResult::Byte(value) = result {
-                        if value >> 1 == self.address {
-                            self.hw_layer.ack();
+                    if value >> 1 == self.address {
+                        self.hw_layer.ack();
 
-                            state = match ReadWriteBit::from_value(value) {
-                                ReadWriteBit::SlaveWrite => {
-                                    I2CState::SlaveWriteValue
-                                }
-                                ReadWriteBit::SlaveRead => {
-                                    self.current_register = None;
-                                    I2CState::SlaveReadValue
-                                }
+                        state = match ReadWriteBit::from_value(value) {
+                            ReadWriteBit::SlaveWrite => {
+                                I2CState::SlaveWriteValue
+                            }
+                            ReadWriteBit::SlaveRead => {
+                                self.current_register = None;
+                                I2CState::SlaveReadValue
                             }
                         }
                     }
                 }
                 I2CState::SlaveReadValue => {
-                    match self.hw_layer.read().expect("Could not read.") {
-                        ReadByteResult::Byte(value) => {
-                            if let Some(register) = self.current_register {
-                                if register >= self.registers.len() {
-                                    panic!("Register {} does not exist.", register)
-                                }
-
-                                self.registers[register].set_value(value);
-                            } else {
-                                self.current_register = Some(value as usize);
-                            }
-                            self.hw_layer.ack();
+                    let value = self.hw_layer.read_byte().expect("Could not read.");
+                    if let Some(register) = self.current_register {
+                        if register >= self.registers.len() {
+                            panic!("Register {} does not exist.", register)
                         }
-                        ReadByteResult::Stop => state = I2CState::ReadI2CAddr,
-                        ReadByteResult::Start => state = I2CState::ReadI2CAddr,
+
+                        self.registers[register].set_value(value);
+                    } else {
+                        self.current_register = Some(value as usize);
                     }
+                    self.hw_layer.ack();
                 }
                 I2CState::SlaveWriteValue => {
-                    if let ReadByteResult::Byte(value) = self.hw_layer.read().expect("Could not read.") {
-                        if value >> 1 == self.address && value & 1 == 0 {
-                            self.get_current_register();
+                    let value = self.hw_layer.read_byte().expect("Could not read.");
+                    if value >> 1 == self.address && value & 1 == 0 {
+                        self.get_current_register();
 
-                            state = I2CState::ReadI2CAddr;
-                        }
+                        state = I2CState::ReadI2CAddr;
                     }
                 }
             }
@@ -165,14 +157,6 @@ impl MainThread {
             return Ok(());
         }
 
-        Err("Current register not set.")
-    }
-
-    fn wait_for_start(&self) -> Result<(), String> {
-        let result = self.hw_layer.read().expect("Could not read byte");
-        match result {
-            ReadType::Start => Ok(()),
-            _ => Err("Unexpected read.")
-        }
+        Err(String::from("Current register not set."))
     }
 }
