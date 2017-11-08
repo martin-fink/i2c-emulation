@@ -1,5 +1,6 @@
 use super::pin::I2CPin;
 use super::register::I2CRegister;
+use super::hardware_layer::{HardwareLayer, ReadType};
 
 #[derive(Copy, Clone, Debug)]
 enum ReadLoopState {
@@ -48,41 +49,39 @@ const STANDARD_ADDRESS: u8 = 0b0101_0101; // dec: 85
 
 /// rw_bit: low: write; high: read
 /// address: i²c address, only 7bit mode supported
-pub struct HWThread {
+pub struct MainThread {
     address: u8,
     registers: Vec<I2CRegister>,
-    current_register: Option<u8>,
-    scl: I2CPin,
-    sda: I2CPin,
+    current_register: Option<usize>,
+    hw_layer: HardwareLayer,
 }
 
-impl HWThread {
+impl MainThread {
     pub fn validate_address_7b(address: u8) -> bool {
         if address > (1 << 7) {
             return false;
         }
 
         match address {
-            0b0000_0000
-            | 0b0000_0001
-            | 0b0000_0010
-            | 0b0000_0011
-            | 0b0000_0100 ... 0b0000_1000
-            | 0b0111_1100 ... 0b1000_0000
-            | 0b0111_1000 ... 0b0111_1100 => false,
+            0b_0000_0000
+            | 0b_0000_0001
+            | 0b_0000_0010
+            | 0b_0000_0011
+            | 0b_0000_0100 ... 0b_0000_1000
+            | 0b_0111_1100 ... 0b_1000_0000
+            | 0b_0111_1000 ... 0b_0111_1100 => false,
             _ => true,
         }
     }
 
     pub fn new() -> Self {
-        assert!(HWThread::validate_address_7b(STANDARD_ADDRESS), "Invalid I²C address: {}", STANDARD_ADDRESS);
+        assert!(MainThread::validate_address_7b(STANDARD_ADDRESS), "Invalid I²C address: {}", STANDARD_ADDRESS);
 
-        HWThread {
+        MainThread {
             address: STANDARD_ADDRESS,
             registers: Vec::new(),
             current_register: Option::None,
-            scl: I2CPin::new(PIN_SCL),
-            sda: I2CPin::new(PIN_SDA),
+            hw_layer: HardwareLayer::new(PIN_SDA, PIN_SCL),
         }
     }
 
@@ -93,11 +92,11 @@ impl HWThread {
                 I2CState::ReadI2CAddr => {
                     self.wait_for_start().expect("Expected start.");
 
-                    let result = self.read().expect("Could not read byte.");
+                    let result = self.hw_layer.read().expect("Could not read byte.");
 
                     if let ReadByteResult::Byte(value) = result {
                         if value >> 1 == self.address {
-                            self.ack();
+                            self.hw_layer.ack();
 
                             state = match ReadWriteBit::from_value(value) {
                                 ReadWriteBit::SlaveWrite => {
@@ -112,28 +111,27 @@ impl HWThread {
                     }
                 }
                 I2CState::SlaveReadValue => {
-                    match self.read().expect("Could not read.") {
+                    match self.hw_layer.read().expect("Could not read.") {
                         ReadByteResult::Byte(value) => {
                             if let Some(register) = self.current_register {
-                                let register = register as usize;
                                 if register >= self.registers.len() {
                                     panic!("Register {} does not exist.", register)
                                 }
 
                                 self.registers[register].set_value(value);
                             } else {
-                                self.current_register = Some(value);
+                                self.current_register = Some(value as usize);
                             }
-                            self.ack();
+                            self.hw_layer.ack();
                         }
                         ReadByteResult::Stop => state = I2CState::ReadI2CAddr,
                         ReadByteResult::Start => state = I2CState::ReadI2CAddr,
                     }
                 }
                 I2CState::SlaveWriteValue => {
-                    if let ReadByteResult::Byte(value) = self.read().expect("Could not read.") {
+                    if let ReadByteResult::Byte(value) = self.hw_layer.read().expect("Could not read.") {
                         if value >> 1 == self.address && value & 1 == 0 {
-                            self.write_current_register();
+                            self.get_current_register();
 
                             state = I2CState::ReadI2CAddr;
                         }
@@ -145,50 +143,36 @@ impl HWThread {
         // TODO: cleanup pins
     }
 
-    fn write_current_register(&self) -> Result<(), ()> {
+    fn get_current_register(&self) -> Result<u8, String> {
         if let Some(register) = self.current_register {
-            let register = register as usize;
             if register >= self.registers.len() {
-                return Err(());
+                return Err(format!("Register {:x} not found.", register));
             }
 
-            return self.write(self.registers[register].get_value());
+            Ok(self.registers[register].get_value())
+        } else {
+            Err(String::from("Current register not set."))
         }
-
-        Err(())
     }
 
-    fn set_current_register(&mut self, value: u8) -> Result<(), ()> {
+    fn set_current_register(&mut self, value: u8) -> Result<(), String> {
         if let Some(register) = self.current_register {
-            let register = register as usize;
             if register >= self.registers.len() {
-                return Err(());
+                return Err(format!("Register {:x} not found.", register));
             }
 
             self.registers[register].set_value(value);
             return Ok(());
         }
 
-        Err(())
+        Err("Current register not set.")
     }
 
-    fn ack(&self) {
-        unimplemented!()
-    }
-
-    fn read(&self) -> Result<ReadByteResult, ()> {
-        unimplemented!()
-    }
-
-    fn write(&self, byte: u8) -> Result<(), ()> {
-        unimplemented!()
-    }
-
-    fn wait_for_start(&self) -> Result<(), ()> {
-        let result = self.read().expect("Could not read byte");
+    fn wait_for_start(&self) -> Result<(), String> {
+        let result = self.hw_layer.read().expect("Could not read byte");
         match result {
-            ReadByteResult::Start => Ok(()),
-            _ => Err(()),
+            ReadType::Start => Ok(()),
+            _ => Err("Unexpected read.")
         }
     }
 }

@@ -1,3 +1,4 @@
 mod pin;
-mod hw_thread;
+mod main_thread;
 mod register;
+mod hardware_layer;
