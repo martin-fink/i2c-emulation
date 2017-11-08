@@ -42,8 +42,8 @@ impl ReadWriteBit {
     }
 }
 
-const PIN_SCL: u8 = 24; // GPIO 5
-const PIN_SDA: u8 = 25; // GPIO 6
+const PIN_SCL: u8 = 5; // GPIO 5
+const PIN_SDA: u8 = 6; // GPIO 6
 
 const STANDARD_ADDRESS: u8 = 0b0101_0101; // dec: 85
 

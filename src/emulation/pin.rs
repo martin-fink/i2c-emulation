@@ -40,7 +40,7 @@ impl I2CPin {
             hw_pin: Pin::new(pin_number as u64),
         };
 
-        i2c_pin.hw_pin.set_direction(Direction::In).expect("Could not set direction on pin. Does the pin exist?");
+        i2c_pin.hw_pin.set_direction(Direction::In).expect("Could not set direction on pin.");
 
         i2c_pin
     }
@@ -67,7 +67,7 @@ impl I2CPin {
 
     /// high: RisingEdge
     pub fn wait_until(&self, high: bool) -> Result<(), PinError> {
-        self.hw_pin.set_edge(if high { Edge::RisingEdge } else { Edge::FallingEdge })?;
+        self.hw_pin.set_edge(if high { Edge::RisingEdge } else { Edge::FallingEdge }).unwrap();
         let mut poller = self.hw_pin.get_poller()?;
 
         loop {
