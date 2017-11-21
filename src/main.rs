@@ -1,13 +1,13 @@
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 extern crate sysfs_gpio;
+extern crate tokio_core;
+extern crate futures;
 
-mod emulation;
-
-use emulation::MainThread;
+mod bit_layer;
 
 fn main() {
-    println!("Hello, world!");
-
-    let mut main_thread = MainThread::new();
-
-    main_thread.start();
+    env_logger::init().expect("Could not init logger.");
+    trace!("Setting up main");
 }
