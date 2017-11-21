@@ -28,16 +28,19 @@ trait I2CPin {
 impl I2CPin for Pin {
     fn set_write_mode(&self) -> Result<(), Error> {
         info!("Setting pin to no interrupt mode");
-        self.sda.set_edge(Edge::NoInterrupt)?;
+        self.set_edge(Edge::NoInterrupt)?;
 
         info!("Setting pin to output mode");
-        self.sda.set_direction(Direction::Out)
+        self.set_direction(Direction::Out)?;
+
+        Ok(())
     }
 
     fn reset(&self) -> Result<(), Error> {
         info!("Resetting interrupt and direction for pin");
-        self.sda.set_direction(Direction::In)?;
-        self.sda.set_edge(Edge::BothEdges)
+        self.set_direction(Direction::In)?;
+        self.set_edge(Edge::BothEdges)?;
+        Ok(())
     }
 }
 
@@ -81,12 +84,13 @@ impl<P> BitLayer<P> where P: I2CProtocol {
 
             match read_message.pin_type {
                 PinType::Sda => {
-                    if read_message.value == 1 && self.scl.get_value() == 1 {
+                    if read_message.value == 1 && self.scl.get_value()? == 1 {
                         info!("Received start");
                         let (address, rw) = self.read_address_and_rw()?;
 
                         if self.implementation.check_address(address) {
                             println!("Address matched!");
+                            println!("RW: {}", rw);
                             self.ack()?;
                             // TODO: do the rest of the implementation
                         } else {
@@ -111,7 +115,7 @@ impl<P> BitLayer<P> where P: I2CProtocol {
             match read_result.pin_type {
                 PinType::Scl => {
                     if read_result.value == 1 {
-                        value = (value << 1) & (read_result.value & 0x1);
+                        value = (value << 1) & (sda_current_value & 0x1);
                     }
                     bytes_read += 1;
                 }
@@ -135,7 +139,7 @@ impl<P> BitLayer<P> where P: I2CProtocol {
                 // change sda when scl is low
                 if read_message.value == 0 {
                     trace!("scl is low, setting sda to {}", read_message.value << index);
-                    self.sda.set_direction(if read_message.value << index == 0 {
+                    self.sda.set_direction(if byte << index == 0 {
                         Direction::Low
                     } else {
                         Direction::High
@@ -162,7 +166,7 @@ impl<P> BitLayer<P> where P: I2CProtocol {
             if let PinType::Scl = read_result.pin_type {
                 if read_result.value == 0 {
                     if !ack_sent {
-                        self.sda.set_direction(Direction::Low);
+                        self.sda.set_direction(Direction::Low)?;
                         ack_sent = true;
                     } else {
                         clock_over = true;
