@@ -6,6 +6,7 @@ extern crate tokio_core;
 extern crate futures;
 
 mod bit_layer;
+mod protocol;
 
 fn main() {
     env_logger::init().expect("Could not init logger.");
