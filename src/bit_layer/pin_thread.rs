@@ -1,4 +1,4 @@
-use sysfs_gpio::{Pin, Edge};
+use sysfs_gpio::{Pin, Edge, Direction};
 use std::sync::mpsc::SyncSender;
 use std::fmt;
 
@@ -37,14 +37,15 @@ impl PinThread {
         }
     }
 
-    pub fn run(self) -> ! {
+    pub fn run(self) {
         trace!("Run method started...");
 
+        self.pin.set_direction(Direction::In).unwrap();
         self.pin.set_edge(Edge::BothEdges).unwrap();
         let mut poller = self.pin.get_poller().expect("Could not get poller.");
 
         loop {
-            match poller.poll(1000).expect("Error reading from pin.") {
+            match poller.poll(5000).expect("Error reading from pin.") {
                 Some(value) => {
                     info!("Read {} at pin {}", value, self.pin_type);
                     self.sender.send(Message {

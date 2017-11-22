@@ -94,7 +94,7 @@ impl<P> BitLayer<P> where P: I2CProtocol {
                             self.ack()?;
                             // TODO: do the rest of the implementation
                         } else {
-                            trace!("Address did not match");
+                            trace!("Address {} did not match", address);
                         }
                     }
                 }
@@ -115,7 +115,7 @@ impl<P> BitLayer<P> where P: I2CProtocol {
             match read_result.pin_type {
                 PinType::Scl => {
                     if read_result.value == 1 {
-                        value = (value << 1) & (sda_current_value & 0x1);
+                        value = (value << 1) | sda_current_value;
                     }
                     bytes_read += 1;
                 }

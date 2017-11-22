@@ -52,12 +52,10 @@ fn main() {
     trace!("Setting up main");
 
     let protocol = ProtocolImplementation::new(0b00110011, vec![0, 0, 0]);
-    let bit_layer = BitLayer::new(protocol, 15, 16);
+    let bit_layer = BitLayer::new(protocol, 6, 5);
 
-    if false {
-        match bit_layer.run() {
-            Ok(()) => {},
-            Err(error) => eprintln!("Error: {}", error),
-        }
+    match bit_layer.run() {
+        Ok(()) => {}
+        Err(error) => eprintln!("Error: {}", error),
     }
 }
