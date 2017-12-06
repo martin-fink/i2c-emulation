@@ -4,7 +4,6 @@ extern crate env_logger;
 extern crate sysfs_gpio;
 extern crate tokio_core;
 extern crate futures;
-extern crate rppal;
 
 mod bit_layer;
 
@@ -52,7 +51,7 @@ fn main() {
 
     trace!("Setting up main");
 
-    let protocol = ProtocolImplementation::new(0b111, vec![0, 0, 0]);
+    let protocol = ProtocolImplementation::new(0b00110011, vec![0, 0, 0]);
     let bit_layer = BitLayer::new(protocol, 6, 5);
 
     match bit_layer.run() {
