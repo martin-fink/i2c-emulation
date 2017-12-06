@@ -1,6 +1,8 @@
-use sysfs_gpio::{Pin, Edge, Direction};
 use std::sync::mpsc::SyncSender;
 use std::fmt;
+use std::time::Duration;
+use std::thread;
+use rppal::gpio::{Gpio, Mode};
 
 impl fmt::Display for PinType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -23,7 +25,8 @@ pub struct Message {
 }
 
 pub struct PinThread {
-    pin: Pin,
+    gpio: Gpio,
+    pin_number: u8,
     sender: SyncSender<Message>,
     pin_type: PinType,
 }
@@ -31,31 +34,29 @@ pub struct PinThread {
 impl PinThread {
     pub fn new(pin_number: u8, sender: SyncSender<Message>, pin_type: PinType) -> Self {
         PinThread {
-            pin: Pin::new(pin_number as u64),
+            gpio: Gpio::new().unwrap(),
+            pin_number,
             sender,
             pin_type,
         }
     }
 
-    pub fn run(self) {
+    pub fn run(mut self) {
         trace!("Run method started...");
 
-        self.pin.set_direction(Direction::In).unwrap();
-        self.pin.set_edge(Edge::BothEdges).unwrap();
-        let mut poller = self.pin.get_poller().expect("Could not get poller.");
+        self.gpio.set_mode(self.pin_number, Mode::Input);
+        let mut last_value = self.gpio.read(self.pin_number).expect("could not read") as u8;
 
         loop {
-            match poller.poll(5000).expect("Error reading from pin.") {
-                Some(value) => {
-                    info!("Read {} at pin {}", value, self.pin_type);
-                    self.sender.send(Message {
-                        pin_type: self.pin_type,
-                        value,
-                    }).unwrap();
-                }
-                None => {
-                    info!("Poller at pin {} timed out, retrying...", self.pin_type);
-                }
+            let value = self.gpio.read(self.pin_number).expect("Could not read") as u8;
+
+            if value != last_value {
+                last_value = value;
+
+                self.sender.send(Message {
+                    pin_type: self.pin_type,
+                    value,
+                }).expect("Could not send.");
             }
         }
     }

@@ -1,4 +1,3 @@
-use sysfs_gpio::{Pin, Edge, Direction};
 use super::I2CProtocol;
 use super::Error;
 use super::RWBit;
@@ -7,6 +6,38 @@ use super::PinThread;
 use super::pin_thread::{PinType, Message};
 use std::sync::mpsc;
 use std::thread;
+use rppal::gpio::{Gpio, Level, Mode};
+
+struct Pin {
+    pin_number: u8,
+    gpio: Gpio,
+}
+
+impl Pin {
+    fn new(pin_number: u8) -> Self {
+        Pin {
+            pin_number,
+            gpio: Gpio::new().unwrap(),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.gpio.set_mode(self.pin_number, Mode::Input)
+    }
+
+    fn get_value(&mut self) -> Result<u8, Error> {
+        Ok(self.gpio.read(self.pin_number)? as u8)
+    }
+
+    fn set_logiclvl(&mut self, value: Level) {
+        self.gpio.write(self.pin_number, value)
+    }
+
+    fn set_write_mode(&mut self) {
+        self.gpio.set_mode(self.pin_number, Mode::Output);
+        self.gpio.write(self.pin_number, Level::High);
+    }
+}
 
 pub struct BitLayer<P> where P: I2CProtocol {
     implementation: P,
@@ -25,33 +56,14 @@ trait I2CPin {
     fn reset(&self) -> Result<(), Error>;
 }
 
-impl I2CPin for Pin {
-    fn set_write_mode(&self) -> Result<(), Error> {
-        info!("Setting pin to no interrupt mode");
-        self.set_edge(Edge::NoInterrupt)?;
-
-        info!("Setting pin to output mode");
-        self.set_direction(Direction::Out)?;
-
-        Ok(())
-    }
-
-    fn reset(&self) -> Result<(), Error> {
-        info!("Resetting interrupt and direction for pin");
-        self.set_direction(Direction::In)?;
-        self.set_edge(Edge::BothEdges)?;
-        Ok(())
-    }
-}
-
 impl<P> BitLayer<P> where P: I2CProtocol {
     pub fn new(implementation: P, sda_num: u8, scl_num: u8) -> Self {
         let (tx, rx) = mpsc::sync_channel::<pin_thread::Message>(0);
 
         BitLayer {
             implementation,
-            sda: Pin::new(sda_num as u64),
-            scl: Pin::new(scl_num as u64),
+            sda: Pin::new(sda_num),
+            scl: Pin::new(scl_num),
             current_register: None,
             sda_num,
             scl_num,
@@ -60,7 +72,7 @@ impl<P> BitLayer<P> where P: I2CProtocol {
         }
     }
 
-    pub fn run(self) -> Result<(), Error> {
+    pub fn run(mut self) -> Result<(), Error> {
         trace!("Start BitLayer Thread");
 
         let scl_num = self.scl_num;
@@ -84,12 +96,12 @@ impl<P> BitLayer<P> where P: I2CProtocol {
 
             match read_message.pin_type {
                 PinType::Sda => {
-                    if read_message.value == 1 && self.scl.get_value()? == 1 {
-                        info!("Received start");
+                    if read_message.value == 0 && self.scl.get_value()? == 1 {
+//                        info!("Received start");
                         let (address, rw) = self.read_address_and_rw()?;
 
                         if self.implementation.check_address(address) {
-                            println!("Address matched!");
+                            println!("Address {:07b} matched!", address);
                             println!("RW: {}", rw);
                             self.ack()?;
                             // TODO: do the rest of the implementation
@@ -103,8 +115,8 @@ impl<P> BitLayer<P> where P: I2CProtocol {
         }
     }
 
-    fn read_address_and_rw(&self) -> Result<(u8, RWBit), Error> {
-        trace!("Reading address and rw");
+    fn read_address_and_rw(&mut self) -> Result<(u8, RWBit), Error> {
+//        trace!("Reading address and rw");
         let mut sda_current_value = self.sda.get_value()?;
         let mut value = 0;
         let mut bytes_read = 0u32;
@@ -116,8 +128,8 @@ impl<P> BitLayer<P> where P: I2CProtocol {
                 PinType::Scl => {
                     if read_result.value == 1 {
                         value = (value << 1) | sda_current_value;
+                        bytes_read += 1;
                     }
-                    bytes_read += 1;
                 }
                 PinType::Sda => sda_current_value = read_result.value
             }
@@ -126,10 +138,11 @@ impl<P> BitLayer<P> where P: I2CProtocol {
         Ok(self.split_address_and_rw(value))
     }
 
-    fn write_byte(&self, byte: u8) -> Result<(), Error> {
+    #[allow(dead_code)]
+    fn write_byte(&mut self, byte: u8) -> Result<(), Error> {
         trace!("Writing byte");
 
-        self.sda.set_write_mode()?;
+        self.sda.set_write_mode();
 
         let mut index = 0;
         while index < 8 {
@@ -139,11 +152,11 @@ impl<P> BitLayer<P> where P: I2CProtocol {
                 // change sda when scl is low
                 if read_message.value == 0 {
                     trace!("scl is low, setting sda to {}", read_message.value << index);
-                    self.sda.set_direction(if byte << index == 0 {
-                        Direction::Low
+                    self.sda.set_logiclvl(if byte << index == 0 {
+                        Level::Low
                     } else {
-                        Direction::High
-                    })?;
+                        Level::High
+                    });
                     index += 1;
                 } else {
                     trace!("scl is high");
@@ -151,31 +164,31 @@ impl<P> BitLayer<P> where P: I2CProtocol {
             }
         }
 
-        self.sda.reset()
+        self.sda.reset();
+
+        Ok(())
     }
 
-    fn ack(&self) -> Result<(), Error> {
-        trace!("Sending ack");
-        let (mut ack_sent, mut clock_over) = (false, false);
+    fn ack(&mut self) -> Result<(), Error> {
+        let mut ack_sent = false;
 
-        self.sda.set_write_mode()?;
+        self.sda.set_write_mode();
 
-        while !ack_sent && !clock_over {
+        self.sda.set_logiclvl(Level::Low);
+
+        loop {
             let read_result = self.rx.recv().unwrap();
 
             if let PinType::Scl = read_result.pin_type {
                 if read_result.value == 0 {
-                    if !ack_sent {
-                        self.sda.set_direction(Direction::Low)?;
-                        ack_sent = true;
-                    } else {
-                        clock_over = true;
-                    }
+                    if ack_sent { break } else { ack_sent = true }
                 }
             }
         }
 
-        self.sda.reset()
+        self.sda.reset();
+
+        Ok(())
     }
 
     fn split_address_and_rw(&self, address_and_rw: u8) -> (u8, RWBit) {

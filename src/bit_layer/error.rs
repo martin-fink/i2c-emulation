@@ -1,5 +1,5 @@
 use std::{error, fmt, io, convert};
-use sysfs_gpio;
+use rppal::gpio;
 
 #[derive(Debug)]
 pub enum Error {
@@ -25,8 +25,8 @@ impl fmt::Display for Error {
     }
 }
 
-impl convert::From<sysfs_gpio::Error> for Error {
-    fn from(prev: sysfs_gpio::Error) -> Self {
+impl convert::From<gpio::Error> for Error {
+    fn from(prev: gpio::Error) -> Self {
         Error::PinError(format!("PinError: {}", prev))
     }
 }
