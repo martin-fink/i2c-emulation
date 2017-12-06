@@ -1,14 +1,17 @@
 #[macro_use]
 extern crate log;
-extern crate env_logger;
 extern crate sysfs_gpio;
 extern crate tokio_core;
 extern crate futures;
 extern crate rppal;
+extern crate clap;
+extern crate fern;
+extern crate chrono;
 
 mod bit_layer;
 
 use bit_layer::{I2CProtocol, BitLayer};
+use clap::{Arg, App};
 
 struct ProtocolImplementation {
     address: u8,
@@ -48,15 +51,50 @@ impl I2CProtocol for ProtocolImplementation {
 }
 
 fn main() {
-    env_logger::init().expect("Could not init logger.");
+    let matches = App::new("i2c_emulation")
+        .version("0.1")
+        .author("Martin Fink <martinfink99@gmail.com")
+        .about("Emulates a i2c slave")
+        .arg(Arg::with_name("address")
+            .value_name("ADDRESS")
+            .required(true)
+            .help("Sets the slave address")
+            .takes_value(true))
+        .arg(Arg::with_name("v")
+            .short("v")
+            .multiple(true)
+            .help("Set the level of verbosity"))
+        .get_matches();
 
-    trace!("Setting up main");
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!("{}[{}][{}] {}",
+                                    chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                                    record.target(),
+                                    record.level(),
+                                    message
+            ))
+        })
+        .chain(std::io::stderr())
+        .chain(fern::log_file("output.log").expect("Could not open log file"))
+        .level(match matches.occurrences_of("v") {
+            0 => log::LogLevelFilter::Error,
+            1 => log::LogLevelFilter::Warn,
+            2 => log::LogLevelFilter::Info,
+            3 => log::LogLevelFilter::Debug,
+            _ => log::LogLevelFilter::Trace,
+        })
+        .apply()
+        .expect("Could not init logger");
 
-    let protocol = ProtocolImplementation::new(0b111, vec![0, 0, 0]);
+    let address = matches.value_of("address").unwrap();
+    let address = address.parse::<u8>().expect("Address must be a valid integer");
+
+    let protocol = ProtocolImplementation::new(address, vec![0, 0, 0]);
     let bit_layer = BitLayer::new(protocol, 6, 5);
 
     match bit_layer.run() {
         Ok(()) => {}
-        Err(error) => eprintln!("Error: {}", error),
+        Err(error) => error!("Error: {}", error),
     }
 }

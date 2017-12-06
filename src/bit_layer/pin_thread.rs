@@ -1,7 +1,5 @@
 use std::sync::mpsc::SyncSender;
 use std::fmt;
-use std::time::Duration;
-use std::thread;
 use rppal::gpio::{Gpio, Mode};
 
 impl fmt::Display for PinType {
