@@ -8,6 +8,11 @@ use std::sync::mpsc;
 use std::thread;
 use rppal::gpio::{Gpio, Level, Mode};
 
+enum RepeatedStartData {
+    Data(u8),
+    RepeatedStart(u8),
+}
+
 struct Pin {
     pin_number: u8,
     gpio: Gpio,
@@ -116,18 +121,29 @@ impl<P> BitLayer<P> where P: I2CProtocol {
 
                             self.ack()?;
 
-                            // TODO: check for repeated start or data
+                            let result = self.read_data_or_repeated_start().unwrap();
 
-                            let data = self.read_data()?;
+                            match result {
+                                RepeatedStartData::Data(value) => {
+                                    self.ack()?;
 
-                            self.ack()?;
+                                    let register_address = self.current_register.unwrap();
+                                    self.implementation.set_register(register_address, value);
+                                }
+                                RepeatedStartData::RepeatedStart(address) => {
+                                    if !self.implementation.check_address(address) {
+                                        println!("wrong address 0x{:x}", address);
+                                        continue;
+                                    } else {
+                                        println!("address 0x{:x} matched", address);
+                                    }
 
-                            self.implementation.set_register(self.current_register.unwrap(), data);
-
-                            info!("Address 0x{:x} matched!", address);
-                            info!("RW: {}", rw);
-                            info!("Register address: 0x{:x}", self.current_register.unwrap());
-                            info!("Read data 0x{:x}", data);
+                                    let current_register = self.current_register.unwrap();
+                                    let byte = self.implementation.get_register(current_register).unwrap();
+                                    println!("writing byte");
+                                    self.write_byte(byte)?;
+                                }
+                            }
                         } else {
                             trace!("Address 0x{:x} did not match", address);
                         }
@@ -157,7 +173,7 @@ impl<P> BitLayer<P> where P: I2CProtocol {
                 }
                 PinType::Sda => {
                     if self.scl.get_value()? == 1 {
-                        return Err(Error::UnexpectedSdaEdge)
+                        return Err(Error::UnexpectedSdaEdge);
                     }
                     sda_current_value = read_result.value
                 }
@@ -167,8 +183,39 @@ impl<P> BitLayer<P> where P: I2CProtocol {
         Ok(value)
     }
 
+    fn read_data_or_repeated_start(&mut self) -> Result<RepeatedStartData, Error> {
+        let mut repeated_start = false;
+        let mut value = 0;
+        let mut bits_read = 0u32;
+
+        while bits_read < 8u32 {
+            let read_result = self.rx.recv().unwrap();
+
+            match read_result.pin_type {
+                PinType::Scl => {
+                    if read_result.value == 1 {
+                        value = (value << 1) | self.sda.get_value()?;
+                        bits_read += 1;
+                    }
+                }
+                PinType::Sda => {
+                    if read_result.value == 0 && self.scl.get_value()? == 1 {
+                        repeated_start = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(if repeated_start {
+            let (address, _) = self.read_address_and_rw()?;
+            RepeatedStartData::RepeatedStart(address)
+        } else {
+            RepeatedStartData::Data(value)
+        })
+    }
+
     fn read_address_and_rw(&mut self) -> Result<(u8, RWBit), Error> {
-//        trace!("Reading address and rw");
         let mut sda_current_value = self.sda.get_value()?;
         let mut value = 0;
         let mut bytes_read = 0u32;
@@ -190,10 +237,7 @@ impl<P> BitLayer<P> where P: I2CProtocol {
         Ok(self.split_address_and_rw(value))
     }
 
-    #[allow(dead_code)]
     fn write_byte(&mut self, byte: u8) -> Result<(), Error> {
-        trace!("Writing byte");
-
         self.sda.set_write_mode();
 
         let mut index = 0;
@@ -203,15 +247,12 @@ impl<P> BitLayer<P> where P: I2CProtocol {
             if let PinType::Scl = read_message.pin_type {
                 // change sda when scl is low
                 if read_message.value == 0 {
-                    trace!("scl is low, setting sda to {}", read_message.value << index);
                     self.sda.set_logiclvl(if byte << index == 0 {
                         Level::Low
                     } else {
                         Level::High
                     });
                     index += 1;
-                } else {
-                    trace!("scl is high");
                 }
             }
         }
@@ -229,13 +270,13 @@ impl<P> BitLayer<P> where P: I2CProtocol {
         self.sda.set_logiclvl(Level::Low);
 
         // wait until scl is low and the slave is allowed to change sda
-//        loop {
-//            let read_result = self.rx.recv().unwrap();
-//
-//            if let PinType::Scl = read_result.pin_type {
-//                if read_result.value == 0 { break }
-//            }
-//        }
+        //        loop {
+        //            let read_result = self.rx.recv().unwrap();
+        //
+        //            if let PinType::Scl = read_result.pin_type {
+        //                if read_result.value == 0 { break }
+        //            }
+        //        }
 
         loop {
             let read_result = self.rx.recv().unwrap();
