@@ -6,6 +6,7 @@ use rppal::gpio;
 pub enum Error {
     Io(io::Error),
     Generic(String),
+    UnexpectedSdaEdge,
 }
 
 impl error::Error for Error {
@@ -13,6 +14,7 @@ impl error::Error for Error {
         match *self {
             Error::Io(ref e) => e.description(),
             Error::Generic(ref descr) => descr,
+            Error::UnexpectedSdaEdge => "Unexpected sda edge",
         }
     }
 }
@@ -22,6 +24,7 @@ impl fmt::Display for Error {
         match *self {
             Error::Io(ref e) => e.fmt(f),
             Error::Generic(ref descr) => write!(f, "PinError: {}", descr),
+            Error::UnexpectedSdaEdge => write!(f, "Unexpected sda edge"),
         }
     }
 }

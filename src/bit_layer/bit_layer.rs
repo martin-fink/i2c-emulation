@@ -97,22 +97,74 @@ impl<P> BitLayer<P> where P: I2CProtocol {
             match read_message.pin_type {
                 PinType::Sda => {
                     if read_message.value == 0 && self.scl.get_value()? == 1 {
-//                        info!("Received start");
                         let (address, rw) = self.read_address_and_rw()?;
 
                         if self.implementation.check_address(address) {
-                            println!("Address {:07b} matched!", address);
-                            println!("RW: {}", rw);
                             self.ack()?;
-                            // TODO: do the rest of the implementation
+
+                            let result = self.read_data();
+
+                            if result.is_err() {
+                                info!("Address 0x{:x} matched!", address);
+                                info!("RW: {}", rw);
+                                continue;
+                            }
+
+                            let result = result.unwrap();
+
+                            self.current_register = Some(result as usize);
+
+                            self.ack()?;
+
+                            // TODO: check for repeated start or data
+
+                            let data = self.read_data()?;
+
+                            self.ack()?;
+
+                            self.implementation.set_register(self.current_register.unwrap(), data);
+
+                            info!("Address 0x{:x} matched!", address);
+                            info!("RW: {}", rw);
+                            info!("Register address: 0x{:x}", self.current_register.unwrap());
+                            info!("Read data 0x{:x}", data);
                         } else {
-                            trace!("Address {} did not match", address);
+                            trace!("Address 0x{:x} did not match", address);
                         }
                     }
                 }
                 PinType::Scl => {}
             }
         }
+    }
+
+    fn read_data(&mut self) -> Result<u8, Error> {
+        trace!("Reading data");
+
+        let mut sda_current_value = self.sda.get_value()?;
+        let mut value = 0;
+        let mut bytes_read = 0u32;
+
+        while bytes_read < 8u32 {
+            let read_result = self.rx.recv().unwrap();
+
+            match read_result.pin_type {
+                PinType::Scl => {
+                    if read_result.value == 1 {
+                        value = (value << 1) | sda_current_value;
+                        bytes_read += 1;
+                    }
+                }
+                PinType::Sda => {
+                    if self.scl.get_value()? == 1 {
+                        return Err(Error::UnexpectedSdaEdge)
+                    }
+                    sda_current_value = read_result.value
+                }
+            }
+        }
+
+        Ok(value)
     }
 
     fn read_address_and_rw(&mut self) -> Result<(u8, RWBit), Error> {
@@ -175,6 +227,15 @@ impl<P> BitLayer<P> where P: I2CProtocol {
         self.sda.set_write_mode();
 
         self.sda.set_logiclvl(Level::Low);
+
+        // wait until scl is low and the slave is allowed to change sda
+//        loop {
+//            let read_result = self.rx.recv().unwrap();
+//
+//            if let PinType::Scl = read_result.pin_type {
+//                if read_result.value == 0 { break }
+//            }
+//        }
 
         loop {
             let read_result = self.rx.recv().unwrap();

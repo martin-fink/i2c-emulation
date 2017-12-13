@@ -90,6 +90,8 @@ fn main() {
     let address = matches.value_of("address").unwrap();
     let address = address.parse::<u8>().expect("Address must be a valid integer");
 
+    info!("Using slave address 0x{:x}", address);
+
     let protocol = ProtocolImplementation::new(address, vec![0, 0, 0]);
     let bit_layer = BitLayer::new(protocol, 6, 5);
 
