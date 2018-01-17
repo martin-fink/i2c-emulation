@@ -132,20 +132,33 @@ impl<P> BitLayer<P> where P: I2CProtocol {
                                 }
                                 RepeatedStartData::RepeatedStart(address) => {
                                     if !self.implementation.check_address(address) {
-                                        println!("wrong address 0x{:x}", address);
                                         continue;
-                                    } else {
-                                        println!("address 0x{:x} matched", address);
                                     }
 
                                     let current_register = self.current_register.unwrap();
                                     let byte = self.implementation.get_register(current_register).unwrap();
-                                    println!("writing byte");
+
+                                    // cheaty ack hack
+                                    self.sda.set_write_mode();
+
+                                    self.sda.set_logiclvl(Level::Low);
+
+                                    loop {
+                                        let read_result = self.rx.recv().unwrap();
+
+                                        if let PinType::Scl = read_result.pin_type {
+                                            if read_result.value == 1 {
+                                                self.sda.reset();
+                                                break;
+                                            }
+                                        }
+                                    }
+
                                     self.write_byte(byte)?;
                                 }
                             }
                         } else {
-                            trace!("Address 0x{:x} did not match", address);
+                            trace!("Address 0x{:08x} did not match", address);
                         }
                     }
                 }
@@ -192,23 +205,20 @@ impl<P> BitLayer<P> where P: I2CProtocol {
             let read_result = self.rx.recv().unwrap();
 
             match read_result.pin_type {
-                PinType::Scl => {
-                    if read_result.value == 1 {
-                        value = (value << 1) | self.sda.get_value()?;
-                        bits_read += 1;
-                    }
+                PinType::Scl => if read_result.value == 1 {
+                    value = (value << 1) | self.sda.get_value()?;
+                    bits_read += 1;
                 }
-                PinType::Sda => {
-                    if read_result.value == 0 && self.scl.get_value()? == 1 {
-                        repeated_start = true;
-                        break;
-                    }
+                PinType::Sda => if read_result.value == 0 && self.scl.get_value()? == 1 {
+                    repeated_start = true;
+                    bits_read = 0;
+                    value = 0;
                 }
             }
         }
 
         Ok(if repeated_start {
-            let (address, _) = self.read_address_and_rw()?;
+            let (address, _) = self.split_address_and_rw(value);
             RepeatedStartData::RepeatedStart(address)
         } else {
             RepeatedStartData::Data(value)
@@ -240,20 +250,27 @@ impl<P> BitLayer<P> where P: I2CProtocol {
     fn write_byte(&mut self, byte: u8) -> Result<(), Error> {
         self.sda.set_write_mode();
 
-        let mut index = 0;
-        while index < 8 {
+        let mut index = 7;
+
+        while index >= 0 {
             let read_message = self.rx.recv().unwrap();
 
-            if let PinType::Scl = read_message.pin_type {
-                // change sda when scl is low
-                if read_message.value == 0 {
-                    self.sda.set_logiclvl(if byte << index == 0 {
-                        Level::Low
-                    } else {
-                        Level::High
-                    });
-                    index += 1;
+            match read_message.pin_type {
+                PinType::Scl => {
+                    if read_message.value == 0 {
+//                        if index == 7 {
+//                            self.sda.reset();
+//                        }
+                        self.sda.set_logiclvl(if byte & (1 << index) == 0 {
+                            Level::Low
+                        } else {
+                            Level::High
+                        });
+
+                        index -= 1;
+                    }
                 }
+                _ => {}
             }
         }
 

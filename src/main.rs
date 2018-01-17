@@ -92,11 +92,11 @@ fn main() {
 
     info!("Using slave address 0x{:x}", address);
 
-    let protocol = ProtocolImplementation::new(address, vec![0, 0, 0]);
+    let protocol = ProtocolImplementation::new(address, vec![0b10111001, 0b10111001, 0b10111000]);
     let bit_layer = BitLayer::new(protocol, 6, 5);
 
     match bit_layer.run() {
-        Ok(()) => {}
+        Ok(()) => error!("Returned from loop"),
         Err(error) => error!("Error: {}", error),
     }
 }
