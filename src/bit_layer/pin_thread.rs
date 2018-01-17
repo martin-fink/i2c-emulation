@@ -4,9 +4,9 @@ use rppal::gpio::{Gpio, Mode};
 
 impl fmt::Display for PinType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(match self {
-            &PinType::Sda => "sda",
-            &PinType::Scl => "scl",
+        f.write_str(match *self {
+            PinType::Sda => "sda",
+            PinType::Scl => "scl",
         })
     }
 }

@@ -3,9 +3,9 @@ use std::fmt;
 
 impl fmt::Display for RWBit {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &RWBit::SlaveRead => f.write_str("SlaveRead"),
-            &RWBit::SlaveWrite => f.write_str("SlaveWrite"),
+        match *self {
+            RWBit::SlaveRead => f.write_str("SlaveRead"),
+            RWBit::SlaveWrite => f.write_str("SlaveWrite"),
         }
     }
 }

@@ -241,19 +241,16 @@ impl<P> BitLayer<P> where P: I2CProtocol {
         while index >= 0 {
             let read_message = self.rx.recv().unwrap();
 
-            match read_message.pin_type {
-                PinType::Scl => {
-                    if read_message.value == 0 {
-                        self.sda.set_logiclvl(if byte & (1 << index) == 0 {
-                            Level::Low
-                        } else {
-                            Level::High
-                        });
+            if let PinType::Scl = read_message.pin_type {
+                if read_message.value == 0 {
+                    self.sda.set_logiclvl(if byte & (1 << index) == 0 {
+                        Level::Low
+                    } else {
+                        Level::High
+                    });
 
-                        index -= 1;
-                    }
+                    index -= 1;
                 }
-                _ => {}
             }
         }
 
@@ -307,4 +304,3 @@ impl<P> BitLayer<P> where P: I2CProtocol {
         (address_and_rw >> 1, RWBit::from(address_and_rw & 0x1))
     }
 }
-
