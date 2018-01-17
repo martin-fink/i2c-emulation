@@ -138,21 +138,7 @@ impl<P> BitLayer<P> where P: I2CProtocol {
                                     let current_register = self.current_register.unwrap();
                                     let byte = self.implementation.get_register(current_register).unwrap();
 
-                                    // cheaty ack hack
-                                    self.sda.set_write_mode();
-
-                                    self.sda.set_logiclvl(Level::Low);
-
-                                    loop {
-                                        let read_result = self.rx.recv().unwrap();
-
-                                        if let PinType::Scl = read_result.pin_type {
-                                            if read_result.value == 1 {
-                                                self.sda.reset();
-                                                break;
-                                            }
-                                        }
-                                    }
+                                    self.ack_immediately()?;
 
                                     self.write_byte(byte)?;
                                 }
@@ -258,9 +244,6 @@ impl<P> BitLayer<P> where P: I2CProtocol {
             match read_message.pin_type {
                 PinType::Scl => {
                     if read_message.value == 0 {
-//                        if index == 7 {
-//                            self.sda.reset();
-//                        }
                         self.sda.set_logiclvl(if byte & (1 << index) == 0 {
                             Level::Low
                         } else {
@@ -286,15 +269,6 @@ impl<P> BitLayer<P> where P: I2CProtocol {
 
         self.sda.set_logiclvl(Level::Low);
 
-        // wait until scl is low and the slave is allowed to change sda
-        //        loop {
-        //            let read_result = self.rx.recv().unwrap();
-        //
-        //            if let PinType::Scl = read_result.pin_type {
-        //                if read_result.value == 0 { break }
-        //            }
-        //        }
-
         loop {
             let read_result = self.rx.recv().unwrap();
 
@@ -306,6 +280,25 @@ impl<P> BitLayer<P> where P: I2CProtocol {
         }
 
         self.sda.reset();
+
+        Ok(())
+    }
+
+    fn ack_immediately(&mut self) -> Result<(), Error> {
+        self.sda.set_write_mode();
+
+        self.sda.set_logiclvl(Level::Low);
+
+        loop {
+            let read_result = self.rx.recv().unwrap();
+
+            if let PinType::Scl = read_result.pin_type {
+                if read_result.value == 1 {
+                    self.sda.reset();
+                    break;
+                }
+            }
+        }
 
         Ok(())
     }
