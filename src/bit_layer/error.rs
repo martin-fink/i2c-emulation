@@ -1,4 +1,4 @@
-use std::{error, fmt, io, convert};
+use std::{convert, error, fmt, io};
 use rppal::gpio;
 
 #[derive(Debug)]

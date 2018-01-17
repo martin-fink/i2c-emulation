@@ -1,17 +1,17 @@
-#[macro_use]
-extern crate log;
-extern crate sysfs_gpio;
-extern crate tokio_core;
-extern crate futures;
-extern crate rppal;
+extern crate chrono;
 extern crate clap;
 extern crate fern;
-extern crate chrono;
+extern crate futures;
+#[macro_use]
+extern crate log;
+extern crate rppal;
+extern crate sysfs_gpio;
+extern crate tokio_core;
 
 mod bit_layer;
 
-use bit_layer::{I2CProtocol, BitLayer};
-use clap::{Arg, App};
+use bit_layer::{BitLayer, I2CProtocol};
+use clap::{App, Arg};
 
 struct ProtocolImplementation {
     address: u8,
@@ -20,10 +20,7 @@ struct ProtocolImplementation {
 
 impl ProtocolImplementation {
     fn new(address: u8, registers: Vec<u8>) -> Self {
-        ProtocolImplementation {
-            address,
-            registers,
-        }
+        ProtocolImplementation { address, registers }
     }
 }
 
@@ -55,24 +52,29 @@ fn main() {
         .version("0.1")
         .author("Martin Fink <martinfink99@gmail.com")
         .about("Emulates a i2c slave")
-        .arg(Arg::with_name("address")
-            .value_name("ADDRESS")
-            .required(true)
-            .help("Sets the slave address")
-            .takes_value(true))
-        .arg(Arg::with_name("v")
-            .short("v")
-            .multiple(true)
-            .help("Set the level of verbosity"))
+        .arg(
+            Arg::with_name("address")
+                .value_name("ADDRESS")
+                .required(true)
+                .help("Sets the slave address")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("v")
+                .short("v")
+                .multiple(true)
+                .help("Set the level of verbosity"),
+        )
         .get_matches();
 
     fern::Dispatch::new()
         .format(|out, message, record| {
-            out.finish(format_args!("{}[{}][{}] {}",
-                                    chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
-                                    record.target(),
-                                    record.level(),
-                                    message
+            out.finish(format_args!(
+                "{}[{}][{}] {}",
+                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                record.target(),
+                record.level(),
+                message
             ))
         })
         .chain(std::io::stderr())
@@ -88,7 +90,9 @@ fn main() {
         .expect("Could not init logger");
 
     let address = matches.value_of("address").unwrap();
-    let address = address.parse::<u8>().expect("Address must be a valid integer");
+    let address = address
+        .parse::<u8>()
+        .expect("Address must be a valid integer");
 
     info!("Using slave address 0x{:x}", address);
 

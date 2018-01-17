@@ -3,7 +3,7 @@ use super::Error;
 use super::RWBit;
 use super::pin_thread;
 use super::PinThread;
-use super::pin_thread::{PinType, Message};
+use super::pin_thread::{Message, PinType};
 use std::sync::mpsc;
 use std::thread;
 use rppal::gpio::{Gpio, Level, Mode};
@@ -44,7 +44,10 @@ impl Pin {
     }
 }
 
-pub struct BitLayer<P> where P: I2CProtocol {
+pub struct BitLayer<P>
+where
+    P: I2CProtocol,
+{
     implementation: P,
     sda: Pin,
     scl: Pin,
@@ -52,7 +55,7 @@ pub struct BitLayer<P> where P: I2CProtocol {
     sda_num: u8,
     scl_num: u8,
     rx: mpsc::Receiver<Message>,
-    tx: mpsc::SyncSender<Message>
+    tx: mpsc::SyncSender<Message>,
 }
 
 trait I2CPin {
@@ -61,7 +64,10 @@ trait I2CPin {
     fn reset(&self) -> Result<(), Error>;
 }
 
-impl<P> BitLayer<P> where P: I2CProtocol {
+impl<P> BitLayer<P>
+where
+    P: I2CProtocol,
+{
     pub fn new(implementation: P, sda_num: u8, scl_num: u8) -> Self {
         let (tx, rx) = mpsc::sync_channel::<pin_thread::Message>(0);
 
@@ -84,16 +90,14 @@ impl<P> BitLayer<P> where P: I2CProtocol {
         let tx = self.tx.clone();
         thread::spawn(move || {
             info!("Spawned scl thread");
-            PinThread::new(scl_num, tx, pin_thread::PinType::Scl)
-                .run();
+            PinThread::new(scl_num, tx, pin_thread::PinType::Scl).run();
         });
 
         let sda_num = self.sda_num;
         let tx = self.tx.clone();
         thread::spawn(move || {
             info!("Spawned sda thread");
-            PinThread::new(sda_num, tx, pin_thread::PinType::Sda)
-                .run();
+            PinThread::new(sda_num, tx, pin_thread::PinType::Sda).run();
         });
 
         loop {
@@ -136,7 +140,8 @@ impl<P> BitLayer<P> where P: I2CProtocol {
                                     }
 
                                     let current_register = self.current_register.unwrap();
-                                    let byte = self.implementation.get_register(current_register).unwrap();
+                                    let byte =
+                                        self.implementation.get_register(current_register).unwrap();
 
                                     self.ack_immediately()?;
 
@@ -194,12 +199,12 @@ impl<P> BitLayer<P> where P: I2CProtocol {
                 PinType::Scl => if read_result.value == 1 {
                     value = (value << 1) | self.sda.get_value()?;
                     bits_read += 1;
-                }
+                },
                 PinType::Sda => if read_result.value == 0 && self.scl.get_value()? == 1 {
                     repeated_start = true;
                     bits_read = 0;
                     value = 0;
-                }
+                },
             }
         }
 
@@ -226,7 +231,7 @@ impl<P> BitLayer<P> where P: I2CProtocol {
                         bytes_read += 1;
                     }
                 }
-                PinType::Sda => sda_current_value = read_result.value
+                PinType::Sda => sda_current_value = read_result.value,
             }
         }
 
@@ -271,7 +276,11 @@ impl<P> BitLayer<P> where P: I2CProtocol {
 
             if let PinType::Scl = read_result.pin_type {
                 if read_result.value == 0 {
-                    if ack_sent { break } else { ack_sent = true }
+                    if ack_sent {
+                        break;
+                    } else {
+                        ack_sent = true
+                    }
                 }
             }
         }

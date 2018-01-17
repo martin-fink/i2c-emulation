@@ -51,10 +51,12 @@ impl PinThread {
             if value != last_value {
                 last_value = value;
 
-                self.sender.send(Message {
-                    pin_type: self.pin_type,
-                    value,
-                }).expect("Could not send.");
+                self.sender
+                    .send(Message {
+                        pin_type: self.pin_type,
+                        value,
+                    })
+                    .expect("Could not send.");
             }
         }
     }
