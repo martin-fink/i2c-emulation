@@ -1,12 +1,9 @@
 extern crate chrono;
 extern crate clap;
 extern crate fern;
-extern crate futures;
 #[macro_use]
 extern crate log;
 extern crate rppal;
-extern crate sysfs_gpio;
-extern crate tokio_core;
 
 mod bit_layer;
 

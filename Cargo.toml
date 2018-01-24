@@ -5,9 +5,6 @@ authors = ["Martin Fink <martinfink99@gmail.com>"]
 
 [dependencies]
 log = "~0.3.8"
-sysfs_gpio = "~0.5.1"
-tokio-core = "~0.1.10"
-futures = "~0.1.17"
 rppal = "~0.2.0"
 clap = "~2.28.0"
 fern = "~0.4.3"
