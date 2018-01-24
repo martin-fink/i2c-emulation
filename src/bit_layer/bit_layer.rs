@@ -52,7 +52,7 @@ pub struct BitLayer<P>
     implementation: P,
     sda: Pin,
     scl: Pin,
-    current_register: Option<usize>,
+    current_register: usize,
     sda_num: u8,
     scl_num: u8,
     rx: mpsc::Receiver<Message>,
@@ -76,7 +76,7 @@ impl<P> BitLayer<P>
             implementation,
             sda: Pin::new(sda_num),
             scl: Pin::new(scl_num),
-            current_register: None,
+            current_register: 0,
             sda_num,
             scl_num,
             rx,
@@ -103,16 +103,20 @@ impl<P> BitLayer<P>
 
         loop {
             match self.read_data_or_signal().unwrap() {
-                MasterSignal::Start(address, rw) => if self.implementation.check_address(address) {
-                    if let RWBit::SlaveWrite = rw {
-                        continue;
-                    }
-
+                MasterSignal::Start(address, _rw) => if self.implementation.check_address(address) {
                     self.ack()?;
 
-                    let result = self.read_data().unwrap();
+//                    info!("Address did match: {:02X}, rw: {}", address, rw);
+//                    if let RWBit::SlaveWrite = rw {
+//                        continue;
+//                    }
 
-                    self.current_register = Some(result as usize);
+
+                    let result = self.read_data_or_signal().unwrap();
+                    self.current_register = match result {
+                        MasterSignal::Data(data) => data as usize,
+                        _ => continue
+                    };
 
                     self.ack()?;
 
@@ -123,27 +127,36 @@ impl<P> BitLayer<P>
                             MasterSignal::Data(value) => {
                                 self.ack()?;
 
-                                let register_address = self.current_register.unwrap();
+                                let register_address = self.current_register;
                                 self.implementation.set_register(register_address, value);
+                                self.current_register = self.current_register + 1;
                             }
                             MasterSignal::Start(address, _rw) => {
                                 if !self.implementation.check_address(address) {
-                                    continue;
+                                    break;
                                 }
 
-                                let current_register = self.current_register.unwrap();
-                                let byte = self.implementation.get_register(current_register);
+                                let byte = self.implementation.get_register(self.current_register);
 
                                 self.ack_immediately()?;
 
-                                self.write_byte(byte)?;
+                                loop {
+                                    self.write_byte(byte)?;
+                                    self.current_register = self.current_register + 1;
+
+                                    if !self.check_ack() {
+                                        break;
+                                    }
+                                }
                             }
-                            MasterSignal::Stop => break
+                            MasterSignal::Stop => {
+                                self.current_register = 0;
+                                break
+                            }
                         }
-                        self.current_register = Some(self.current_register.unwrap() + 1)
                     }
                 } else {
-                    trace!("Address 0x{:08x} did not match", address);
+                    info!("Address 0x{:02x} did not match", address);
                 }
                 MasterSignal::Data(_) => {}
                 MasterSignal::Stop => {}
@@ -151,42 +164,26 @@ impl<P> BitLayer<P>
         }
     }
 
-    fn read_data(&mut self) -> Result<u8, Error> {
-        trace!("Reading data");
-
-        let mut sda_current_value = self.sda.get_value()?;
-        let mut value = 0;
-        let mut bytes_read = 0u32;
-
-        while bytes_read < 8u32 {
+    fn check_ack(&mut self) -> bool {
+        loop {
             let read_result = self.rx.recv().unwrap();
 
             match read_result.pin_type {
-                PinType::Scl => {
-                    if read_result.value == 1 {
-                        value = (value << 1) | sda_current_value;
-                        bytes_read += 1;
-                    }
+                PinType::Scl => if read_result.value == 1 {
+                    return self.sda.get_value().unwrap() == 0
                 }
-                PinType::Sda => {
-                    if self.scl.get_value()? == 1 {
-                        return Err(Error::UnexpectedSdaEdge);
-                    }
-                    sda_current_value = read_result.value
-                }
+                PinType::Sda => {}
             }
         }
-
-        Ok(value)
     }
 
     fn read_data_or_signal(&mut self) -> Result<MasterSignal, Error> {
-        let mut repeated_start = false;
-        let mut value = 0;
-        let mut bits_read = 0u32;
+        let mut start = false;
         let mut stop = false;
+        let mut value = 0u8;
+        let mut bits_read = 0u8;
 
-        while bits_read < 8u32 {
+        while bits_read < 8 {
             let read_result = self.rx.recv().unwrap();
 
             match read_result.pin_type {
@@ -195,17 +192,17 @@ impl<P> BitLayer<P>
                     bits_read += 1;
                 },
                 PinType::Sda => if read_result.value == 0 && self.scl.get_value()? == 1 {
-                    repeated_start = true;
+                    start = true;
                     bits_read = 0;
                     value = 0;
-                } else {
+                } else if read_result.value == 1 && self.scl.get_value()? == 1 {
                     stop = true;
                     break
                 },
             }
         }
 
-        Ok(if repeated_start {
+        Ok(if start {
             let (address, rw) = self.split_address_and_rw(value);
             MasterSignal::Start(address, rw)
         } else if stop {

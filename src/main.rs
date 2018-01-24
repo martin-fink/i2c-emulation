@@ -28,7 +28,7 @@ impl I2CProtocol for ProtocolImplementation {
 
     fn set_register(&mut self, register: usize, data: u8) {
         if self.registers.len() <= register {
-            for _ in self.registers.len()..register {
+            for _ in self.registers.len()..register + 1 {
                 self.registers.push(0)
             }
         }
