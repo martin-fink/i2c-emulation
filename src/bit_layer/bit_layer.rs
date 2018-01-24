@@ -8,9 +8,10 @@ use std::sync::mpsc;
 use std::thread;
 use rppal::gpio::{Gpio, Level, Mode};
 
-enum RepeatedStartData {
+enum MasterSignal {
     Data(u8),
-    RepeatedStart(u8),
+    Start(u8, RWBit),
+    Stop,
 }
 
 struct Pin {
@@ -45,8 +46,8 @@ impl Pin {
 }
 
 pub struct BitLayer<P>
-where
-    P: I2CProtocol,
+    where
+        P: I2CProtocol,
 {
     implementation: P,
     sda: Pin,
@@ -65,8 +66,8 @@ trait I2CPin {
 }
 
 impl<P> BitLayer<P>
-where
-    P: I2CProtocol,
+    where
+        P: I2CProtocol,
 {
     pub fn new(implementation: P, sda_num: u8, scl_num: u8) -> Self {
         let (tx, rx) = mpsc::sync_channel::<pin_thread::Message>(0);
@@ -101,59 +102,51 @@ where
         });
 
         loop {
-            let read_message = self.rx.recv().expect("Channel was closed.");
-
-            match read_message.pin_type {
-                PinType::Sda => {
-                    if read_message.value == 0 && self.scl.get_value()? == 1 {
-                        let (address, rw) = self.read_address_and_rw()?;
-
-                        if self.implementation.check_address(address) {
-                            self.ack()?;
-
-                            let result = self.read_data();
-
-                            if result.is_err() {
-                                info!("Address 0x{:x} matched!", address);
-                                info!("RW: {}", rw);
-                                continue;
-                            }
-
-                            let result = result.unwrap();
-
-                            self.current_register = Some(result as usize);
-
-                            self.ack()?;
-
-                            let result = self.read_data_or_repeated_start().unwrap();
-
-                            match result {
-                                RepeatedStartData::Data(value) => {
-                                    self.ack()?;
-
-                                    let register_address = self.current_register.unwrap();
-                                    self.implementation.set_register(register_address, value);
-                                }
-                                RepeatedStartData::RepeatedStart(address) => {
-                                    if !self.implementation.check_address(address) {
-                                        continue;
-                                    }
-
-                                    let current_register = self.current_register.unwrap();
-                                    let byte =
-                                        self.implementation.get_register(current_register).unwrap();
-
-                                    self.ack_immediately()?;
-
-                                    self.write_byte(byte)?;
-                                }
-                            }
-                        } else {
-                            trace!("Address 0x{:08x} did not match", address);
-                        }
+            match self.read_data_or_signal().unwrap() {
+                MasterSignal::Start(address, rw) => if self.implementation.check_address(address) {
+                    if let RWBit::SlaveWrite = rw {
+                        continue;
                     }
+
+                    self.ack()?;
+
+                    let result = self.read_data().unwrap();
+
+                    self.current_register = Some(result as usize);
+
+                    self.ack()?;
+
+                    loop {
+                        let result = self.read_data_or_signal().unwrap();
+
+                        match result {
+                            MasterSignal::Data(value) => {
+                                self.ack()?;
+
+                                let register_address = self.current_register.unwrap();
+                                self.implementation.set_register(register_address, value);
+                            }
+                            MasterSignal::Start(address, _rw) => {
+                                if !self.implementation.check_address(address) {
+                                    continue;
+                                }
+
+                                let current_register = self.current_register.unwrap();
+                                let byte = self.implementation.get_register(current_register);
+
+                                self.ack_immediately()?;
+
+                                self.write_byte(byte)?;
+                            }
+                            MasterSignal::Stop => break
+                        }
+                        self.current_register = Some(self.current_register.unwrap() + 1)
+                    }
+                } else {
+                    trace!("Address 0x{:08x} did not match", address);
                 }
-                PinType::Scl => {}
+                MasterSignal::Data(_) => {}
+                MasterSignal::Stop => {}
             }
         }
     }
@@ -187,10 +180,11 @@ where
         Ok(value)
     }
 
-    fn read_data_or_repeated_start(&mut self) -> Result<RepeatedStartData, Error> {
+    fn read_data_or_signal(&mut self) -> Result<MasterSignal, Error> {
         let mut repeated_start = false;
         let mut value = 0;
         let mut bits_read = 0u32;
+        let mut stop = false;
 
         while bits_read < 8u32 {
             let read_result = self.rx.recv().unwrap();
@@ -204,38 +198,21 @@ where
                     repeated_start = true;
                     bits_read = 0;
                     value = 0;
+                } else {
+                    stop = true;
+                    break
                 },
             }
         }
 
         Ok(if repeated_start {
-            let (address, _) = self.split_address_and_rw(value);
-            RepeatedStartData::RepeatedStart(address)
+            let (address, rw) = self.split_address_and_rw(value);
+            MasterSignal::Start(address, rw)
+        } else if stop {
+            MasterSignal::Stop
         } else {
-            RepeatedStartData::Data(value)
+            MasterSignal::Data(value)
         })
-    }
-
-    fn read_address_and_rw(&mut self) -> Result<(u8, RWBit), Error> {
-        let mut sda_current_value = self.sda.get_value()?;
-        let mut value = 0;
-        let mut bytes_read = 0u32;
-
-        while bytes_read < 8u32 {
-            let read_result = self.rx.recv().unwrap();
-
-            match read_result.pin_type {
-                PinType::Scl => {
-                    if read_result.value == 1 {
-                        value = (value << 1) | sda_current_value;
-                        bytes_read += 1;
-                    }
-                }
-                PinType::Sda => sda_current_value = read_result.value,
-            }
-        }
-
-        Ok(self.split_address_and_rw(value))
     }
 
     fn write_byte(&mut self, byte: u8) -> Result<(), Error> {

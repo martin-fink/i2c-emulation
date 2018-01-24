@@ -26,20 +26,21 @@ impl I2CProtocol for ProtocolImplementation {
         self.address == address
     }
 
-    fn set_register(&mut self, register: usize, data: u8) -> bool {
+    fn set_register(&mut self, register: usize, data: u8) {
         if self.registers.len() <= register {
-            return false;
+            for _ in self.registers.len()..register {
+                self.registers.push(0)
+            }
         }
 
         self.registers[register] = data;
-        true
     }
 
-    fn get_register(&self, register: usize) -> Option<u8> {
+    fn get_register(&self, register: usize) -> u8 {
         if self.registers.len() <= register {
-            None
+            0
         } else {
-            Some(self.registers[register])
+            self.registers[register]
         }
     }
 }

@@ -16,9 +16,9 @@ pub trait I2CProtocol {
 
     /// Sets a register
     /// Returns if the register does exist
-    fn set_register(&mut self, register: usize, data: u8) -> bool;
+    fn set_register(&mut self, register: usize, data: u8);
 
     /// Gets the register
     /// Returns Option::None if the register does not exist
-    fn get_register(&self, register: usize) -> Option<u8>;
+    fn get_register(&self, register: usize) -> u8;
 }
