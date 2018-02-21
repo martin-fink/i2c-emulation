@@ -94,7 +94,7 @@ fn main() {
 
     info!("Using slave address 0x{:x}", address);
 
-    let protocol = ProtocolImplementation::new(address, vec![0b1011_1001, 0xAA, 0b0111_0000]);
+    let protocol = ProtocolImplementation::new(address, vec![0xAA, 0xBB, 0xAA]);
     let bit_layer = BitLayer::new(protocol, 6, 5);
 
     match bit_layer.run() {

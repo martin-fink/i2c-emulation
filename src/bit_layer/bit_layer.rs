@@ -12,6 +12,7 @@ enum MasterSignal {
     Data(u8),
     Start(u8, RWBit),
     Stop,
+    Ack(bool),
 }
 
 struct Pin {
@@ -46,8 +47,8 @@ impl Pin {
 }
 
 pub struct BitLayer<P>
-    where
-        P: I2CProtocol,
+where
+    P: I2CProtocol,
 {
     implementation: P,
     sda: Pin,
@@ -66,8 +67,8 @@ trait I2CPin {
 }
 
 impl<P> BitLayer<P>
-    where
-        P: I2CProtocol,
+where
+    P: I2CProtocol,
 {
     pub fn new(implementation: P, sda_num: u8, scl_num: u8) -> Self {
         let (tx, rx) = mpsc::sync_channel::<pin_thread::Message>(0);
@@ -102,20 +103,14 @@ impl<P> BitLayer<P>
         });
 
         loop {
-            match self.read_data_or_signal().unwrap() {
-                MasterSignal::Start(address, _rw) => if self.implementation.check_address(address) {
+            if let MasterSignal::Start(address, _rw) = self.read_data_or_signal().unwrap() {
+                if self.implementation.check_address(address) {
                     self.ack()?;
-
-//                    info!("Address did match: {:02X}, rw: {}", address, rw);
-//                    if let RWBit::SlaveWrite = rw {
-//                        continue;
-//                    }
-
 
                     let result = self.read_data_or_signal().unwrap();
                     self.current_register = match result {
                         MasterSignal::Data(data) => data as usize,
-                        _ => continue
+                        _ => continue,
                     };
 
                     self.ack()?;
@@ -129,50 +124,51 @@ impl<P> BitLayer<P>
 
                                 let register_address = self.current_register;
                                 self.implementation.set_register(register_address, value);
-                                self.current_register = self.current_register + 1;
+                                self.current_register += 1;
                             }
                             MasterSignal::Start(address, _rw) => {
                                 if !self.implementation.check_address(address) {
                                     break;
                                 }
 
-                                let byte = self.implementation.get_register(self.current_register);
-
                                 self.ack_immediately()?;
 
                                 loop {
+                                    let byte =
+                                        self.implementation.get_register(self.current_register);
                                     self.write_byte(byte)?;
-                                    self.current_register = self.current_register + 1;
 
-                                    if !self.check_ack() {
-                                        break;
+                                    match self.check_ack() {
+                                        MasterSignal::Ack(true) => self.current_register += 1,
+                                        MasterSignal::Ack(false) => break,
+                                        _ => {}
                                     }
                                 }
                             }
                             MasterSignal::Stop => {
                                 self.current_register = 0;
-                                break
+                                break;
                             }
+                            _ => {}
                         }
                     }
                 } else {
                     info!("Address 0x{:02x} did not match", address);
                 }
-                MasterSignal::Data(_) => {}
-                MasterSignal::Stop => {}
             }
         }
     }
 
-    fn check_ack(&mut self) -> bool {
+    fn check_ack(&mut self) -> MasterSignal {
         loop {
             let read_result = self.rx.recv().unwrap();
 
-            match read_result.pin_type {
-                PinType::Scl => if read_result.value == 1 {
-                    return self.sda.get_value().unwrap() == 0
-                }
-                PinType::Sda => {}
+            if let PinType::Scl = read_result.pin_type {
+                return if self.sda.get_value().unwrap() == 0 {
+                    MasterSignal::Ack(true)
+                } else {
+                    MasterSignal::Ack(false)
+                };
             }
         }
     }
@@ -197,7 +193,7 @@ impl<P> BitLayer<P>
                     value = 0;
                 } else if read_result.value == 1 && self.scl.get_value()? == 1 {
                     stop = true;
-                    break
+                    break;
                 },
             }
         }
@@ -229,6 +225,16 @@ impl<P> BitLayer<P>
                     });
 
                     index -= 1;
+                }
+            }
+        }
+
+        loop {
+            let read_message = self.rx.recv().unwrap();
+
+            if let PinType::Scl = read_message.pin_type {
+                if read_message.value == 0 {
+                    break;
                 }
             }
         }
